@@ -18,6 +18,7 @@ module.exports = {
     units: 'XRP'
   },
   duration: 600,
+  interval: 'P0Y1M',
   version: {
     codius: {
       min: 1
