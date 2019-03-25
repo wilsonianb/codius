@@ -75,8 +75,9 @@ function getParsedResponses (responses, currency, status) {
 async function fetchUploadManifest (host, duration, maxPrice, manifestJson) {
   const fetchFunction = fetch(`${host}/pods?duration=${duration}`, {
     headers: {
-      Accept: `application/codius-v${config.version.codius.min}+json`,
-      'Content-Type': 'application/json'
+      'Accept': `application/codius-v${config.version.codius.min}+json`,
+      'Content-Type': 'application/json',
+      'Pay-Accept:': 'interledger-stream'
     },
     maxPrice: maxPrice.toString(),
     method: 'POST',

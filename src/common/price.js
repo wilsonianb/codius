@@ -51,11 +51,17 @@ async function getPrice (amount, assetCode) {
 }
 
 async function unitsPerHost ({
+  maxPrice,
   maxMonthlyRate = config.price.amount,
   units = config.price.units,
   duration = config.duration
 }) {
-  const totalFee = new BigNumber(duration * monthsPerSecond * maxMonthlyRate)
+  let totalFee
+  if (!maxPrice) {
+    totalFee = new BigNumber(duration * monthsPerSecond * maxMonthlyRate)
+  } else {
+    totalFee = new BigNumber(maxPrice)
+  }
   logger.debug(`Total fee in ${units}: ${totalFee}`)
   const quotedPrice = await getPrice(totalFee, units)
   // Increase the price by 8/100ths of a percent since the server rounds up so we are not off by a few drops

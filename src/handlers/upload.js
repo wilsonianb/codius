@@ -86,6 +86,11 @@ async function upload (options) {
     const maxPrice = await unitsPerHost(options)
     const currencyDetails = await getCurrencyDetails()
 
+    let pull = false
+    if (options.pullServerURL && options.pullServerSecret) {
+      pull = true
+    }
+
     statusIndicator.start(`Checking Host(s) Price vs Max Price ${maxPrice.toString()} ${currencyDetails}`)
     const validHostOptions = {
       maxPrice,
@@ -93,7 +98,7 @@ async function upload (options) {
       manifestJson: generatedManifestObj,
       codiusHostsExists
     }
-    const validHostList = await getValidHosts(options, validHostOptions)
+    const { validHostList, pullDetails } = await getValidHosts(pull, options, validHostOptions)
     statusIndicator.succeed()
     addHostsToManifest(statusIndicator, options, generatedManifestObj, validHostList)
     const manifestHash = hashManifest(generatedManifestObj.manifest)
@@ -125,6 +130,12 @@ async function upload (options) {
         throw new Error('Upload aborted by user')
       }
     }
+
+    if (pull) {
+      statusIndicator.start(`Creating pull payment pointers for ${validHostList.length} host(s)`)
+      const pullPointers = await requestPointers(options, pullDetails)
+    }
+
     statusIndicator.start(`Uploading to ${validHostList.length} host(s)`)
 
     const uploadHostsResponse = await uploadManifestToHosts(statusIndicator,
