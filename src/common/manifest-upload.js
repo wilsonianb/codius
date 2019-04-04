@@ -5,7 +5,6 @@
  */
 
 const logger = require('riverpig')('codius-cli:manifest-upload')
-const fetch = require('ilp-fetch')
 const config = require('../config.js')
 const moment = require('moment')
 const { getCurrencyDetails } = require('../common/price.js')
@@ -14,7 +13,7 @@ const { checkStatus, fetchPromise } = require('../common/utils.js')
 const chalk = require('chalk')
 const FETCH_TIMEOUT = 70000 // 1m10s
 
-function getParsedResponses (responses, currency, status) {
+function getParsedResponses (responses, status) {
   const parsedResponses = responses.reduce((acc, curr) => {
     const res = curr.response || curr
     if (checkStatus(curr)) {
@@ -26,7 +25,7 @@ function getParsedResponses (responses, currency, status) {
         expirationDate: moment(res.expiry).format('MM-DD-YYYY HH:mm:ss ZZ'),
         expires: moment().to(moment(res.expiry)),
         pricePaid: curr.price,
-        units: currency
+        units: getCurrencyDetails(curr)
       }
       acc.success = [...acc.success, successObj]
     } else {
@@ -72,54 +71,54 @@ function getParsedResponses (responses, currency, status) {
   return parsedResponses
 }
 
-async function fetchUploadManifest (host, duration, maxPrice, manifestJson) {
-  const fetchFunction = fetch(`${host}/pods?duration=${duration}`, {
+function getUploadRequest (manifestJson) {
+  return {
     headers: {
-      'Accept': `application/codius-v${config.version.codius.min}+json`,
-      'Content-Type': 'application/json',
-      'Pay-Accept:': 'interledger-stream'
+      Accept: `application/codius-v${config.version.codius.min}+json`,
+      'Content-Type': 'application/json'
     },
-    maxPrice: maxPrice.toString(),
     method: 'POST',
     body: JSON.stringify(manifestJson),
     timeout: FETCH_TIMEOUT
-  })
-  return fetchPromise(fetchFunction, host, FETCH_TIMEOUT)
+  }
 }
 
-async function extendManifestByHashOnHosts (host, duration, maxPrice, manifestHash) {
-  const fetchFunction = fetch(`${host}/pods?manifestHash=${manifestHash}&duration=${duration}`, {
+function getExtendRequest () {
+  return {
     headers: {
       Accept: `application/codius-v${config.version.codius.min}+json`
     },
-    maxPrice: maxPrice.toString(),
     method: 'PUT',
     timeout: FETCH_TIMEOUT
-  })
+  }
+}
+
+async function fetch (host, paidRequest, payToken) {
+  const fetchFunction = payToken ? paidRequest.fetch(host, payToken) : paidRequest.fetch(host)
   return fetchPromise(fetchFunction, host, FETCH_TIMEOUT)
 }
 
-async function uploadManifestToHosts (status, hosts, duration, maxPrice, manifestJson) {
-  const currency = await getCurrencyDetails()
+async function uploadManifestToHosts (status, hosts, paidRequest, pullPointers, duration) {
   logger.debug(`Upload to Hosts: ${JSON.stringify(hosts)} Duration: ${duration}`)
   const uploadPromises = hosts.map((host) => {
-    return fetchUploadManifest(host, duration, maxPrice, manifestJson)
+    return fetch(host, paidRequest, pullPointers[host])
   })
   const responses = await Promise.all(uploadPromises)
-  return getParsedResponses(responses, currency, status)
+  return getParsedResponses(responses, status)
 }
 
-async function extendManifestByHash (status, hosts, duration, maxPrice, manifestHash) {
-  const currency = await getCurrencyDetails()
+async function extendManifestByHash (status, hosts, paidRequest, duration, manifestHash) {
   logger.debug(`Extending manifest hash ${manifestHash} on Hosts: ${JSON.stringify(hosts)} Duration: ${duration}`)
   const extendPromises = hosts.map((host) => {
-    return extendManifestByHashOnHosts(host, duration, maxPrice, manifestHash)
+    return fetch(host.host, paidRequest, host.pullPointer)
   })
   const responses = await Promise.all(extendPromises)
-  return getParsedResponses(responses, currency, status)
+  return getParsedResponses(responses, status)
 }
 
 module.exports = {
+  getUploadRequest,
+  getExtendRequest,
   uploadManifestToHosts,
   extendManifestByHash
 }

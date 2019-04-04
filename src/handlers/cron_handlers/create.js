@@ -1,7 +1,8 @@
 const { getCurrencyDetails, unitsPerHost } = require('../../common/price.js')
 const { checkPricesOnHosts } = require('../../common/host-utils.js')
 const { getCodiusState, saveCodiusState } = require('../../common/codius-state.js')
-const { uploadManifestToHosts } = require('../../common/manifest-upload.js')
+const { getUploadRequest, uploadManifestToHosts } = require('../../common/manifest-upload.js')
+const { StreamRequest } = require('../common/paid-request.js')
 const ora = require('ora')
 const statusIndicator = ora({ text: '', color: 'blue', spinner: 'point' })
 const crontab = require('crontab')
@@ -105,12 +106,18 @@ async function extendByBuffer (options, { codiusStateFilePath, codiusStateJson }
   }
 
   statusIndicator.start('Calculating Max Price')
-  const maxPrice = await unitsPerHost(extendOptions)
-  const currencyDetails = await getCurrencyDetails()
+  const maxPrice = unitsPerHost(extendOptions)
+  const sourceMaxPrice = await StreamRequest.convertToSourceAsset({
+    amount: maxPrice,
+    assetCode: extendOptions.units
+  })
+  const currencyDetails = getCurrencyDetails(sourceMaxPrice)
   statusIndicator.succeed()
 
-  statusIndicator.start(`Checking Host(s) Price vs Max Price ${maxPrice.toString()} ${currencyDetails}`)
-  await checkPricesOnHosts(hostList, extendOptions.duration, maxPrice, manifestJson)
+  statusIndicator.start(`Checking Host(s) Price vs Max Price ${sourceMaxPrice.amount.toString()} ${currencyDetails}`)
+  const request = getUploadRequest(manifestJson)
+  const paidRequest = new StreamRequest(`/pods?duration=${options.duration}`, request, sourceMaxPrice)
+  await checkPricesOnHosts(hostList, paidRequest)
   statusIndicator.succeed()
 
   statusIndicator.start(`Extending pod on ${hostList.length} host(s)`)
@@ -122,7 +129,7 @@ async function extendByBuffer (options, { codiusStateFilePath, codiusStateJson }
     if (duration > 0) {
       const uploadHostList = [host]
       const responses = await uploadManifestToHosts(statusIndicator,
-        uploadHostList, duration, maxPrice, manifestJson)
+        uploadHostList, paidRequest, extendOptions.duration)
       uploadHostResponses.success = [...uploadHostResponses.success, ...responses.success]
       uploadHostResponses.failed = [...uploadHostResponses.failed, ...responses.failed]
     } else {

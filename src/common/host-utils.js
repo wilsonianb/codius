@@ -4,14 +4,10 @@
  * @author Travis Crist
  */
 
-const fetch = require('node-fetch')
 const logger = require('riverpig')('codius-cli:host-utils')
-const config = require('../config.js')
-const BigNumber = require('bignumber.js')
 const sampleSize = require('lodash.samplesize')
-const { getCurrencyDetails, getPrice } = require('../common/price.js')
 const { URL } = require('url')
-const { fetchPromise } = require('../common/utils.js')
+const { checkStatus, fetchPromise } = require('../common/utils.js')
 const moment = require('moment')
 const BATCH_SIZE = 30
 
@@ -37,108 +33,38 @@ function cleanHostListUrls (hosts) {
   })
 }
 
-async function fetchHostPrice (payAccept, host, duration, manifestJson) {
-  let url = `${host}/pods`
-  if (payAccept === 'interledger-stream') {
-    url += `?duration=${duration}`
-  }
-  const fetchFunction = fetch(url, {
-    headers: {
-      'Accept': `application/codius-v${config.version.codius.min}+json`,
-      'Content-Type': 'application/json',
-      'Pay-Accept': payAccept
-    },
-    method: 'POST',
-    body: JSON.stringify(manifestJson),
-    timeout: 10000 // 10s
-  })
+async function fetchHostPrice (host, paidRequest) {
+  const fetchFunction = paidRequest.fetchPrice(host)
   return fetchPromise(fetchFunction, host)
 }
 
-function checkHeaderAsset (method, response) {
-  if (!response.headers.get(`${method}-asset-code`) || !response.headers.get(`${method}-asset-scale`)) {
-    return false
-  } else {
-    return true
-  }
-}
-
-async function getHostPrice (method, response) {
-  const unscaledQuote = new BigNumber(response.headers.get(`${method}-price`)).dividedBy(Math.pow(10, response.headers.get(`${method}-asset-scale`)))
-  let hostPrice
-  if (method === 'interledger-stream') {
-    hostPrice = await getPrice(unscaledQuote, response.headers.get(`${method}-asset-code`))
-  } else if (method === 'interledger-pull') {
-    // call to SPSP exchange enpoint
-  }
-
-  return hostPrice
-}
-
-async function checkHostsPrices (fetchHostPromises, maxPrice, maxInterval) {
+async function checkHostsPrices (fetchHostPromises, paidRequest) {
   logger.debug(`Fetching host prices from ${fetchHostPromises.length} host(s)`)
   const responses = await Promise.all(fetchHostPromises)
-  const currency = await getCurrencyDetails()
   const results = await responses.reduce(async (acc, curr) => {
-    const method = curr.headers.get('Pay').split(' ')[0]
-    if (checkHeaderAsset(method, curr)) {
-      const errorMessage = {
-        message: 'Quote is missing asset code and scale.',
-        host: curr.host
-      }
-      acc.failed.push(errorMessage)
-      return acc
-    }
-    const hostPrice = await getHostPrice(method, curr)
-    curr.hostPrice = hostPrice
-    if (method === 'interledger-stream') {
-      if (!hostPrice.lte(maxPrice)) {
-        const errorMessage = {
-          message: 'Quoted price exceeded specified max price, please increase your max price.',
-          host: curr.host,
-          quotedPrice: `${hostPrice.toString()} ${currency}`,
-          maxPrice: `${maxPrice.toString()} ${currency}`
-        }
-        acc.failed.push(errorMessage)
-      } else {
+    try {
+      if (await paidRequest.checkHostPrice(curr)) {
         acc.success.push(curr)
       }
-      return acc
-    } else if (method === 'interledger-pull') {
-      const hostInterval = moment.duration(curr.headers.get('interledger-pull-interval'))
-      if (maxInterval < hostInterval) {
-        if (maxPrice.gte(hostPrice)) {
-          acc.success.push(curr)
-        } else {
-          const errorMessage = {
-            message: "Host's minimum interval exceeds your maximum interval and your maximum price does not cover the host's price. Please increase your max interval and/or your max price.",
-            host: curr.host,
-            quotedInterval: hostInterval.toString(),
-            maxInterval: maxInterval.toString()
-          }
-          acc.failed.push(errorMessage)
-        }
+    } catch (e) {
+      if (typeof e.message === 'string') {
+        acc.failed.push({
+          message: e.message,
+          host: curr.host
+        })
       } else {
-        const maxPriceAdj = maxPrice / maxInterval * hostInterval
-        if (maxPriceAdj.gte(hostPrice)) {
-          acc.success.push(curr)
-        } else {
-          const errorMessage = {
-            message: "Host's minimum price exceeds your maximum price. Please increase your max price.",
-            host: curr.host,
-            quotedPrice: `${hostPrice.toString()} ${currency}`,
-            maxPrice: `${maxPriceAdj.toString()} ${currency}`
-          }
-          acc.failed.push(errorMessage)
-        }
+        acc.failed.push({
+          ...e.message,
+          host: curr.host
+        })
       }
-      return acc
     }
+    return acc
   }, { success: [], failed: [] })
   return results
 }
 
-async function gatherMatchingValidHosts ({ duration, hostCount = 1 }, hostList, maxPrice, manifestJson) {
+async function gatherMatchingValidHosts ({ hostCount = 1 }, hostList, paidRequest) {
   let validHosts = []
   const maxAttempts = hostList.length
   let attemptCount = 0
@@ -150,20 +76,20 @@ async function gatherMatchingValidHosts ({ duration, hostCount = 1 }, hostList, 
     logger.debug(`Candidate Hosts: ${candidateHosts}`)
     logger.debug(`InvalidHosts: ${invalidHosts}`)
     attemptCount += candidateHosts.length
-    const fetchPromises = candidateHosts.map((host) => fetchHostPrice(host, duration, manifestJson))
-    const priceCheckResults = await checkHostsPrices(fetchPromises, maxPrice)
+    const fetchPromises = candidateHosts.map((host) => fetchHostPrice(host, paidRequest))
+    const priceCheckResults = await checkHostsPrices(fetchPromises, paidRequest)
     if (priceCheckResults.success.length > 0) {
-      validHosts = [...new Set([...validHosts, ...priceCheckResults.success])]
+      validHosts = [...new Set([...validHosts, ...priceCheckResults.success.map((obj) => obj.host)])]
     }
 
     if (priceCheckResults.failed.length > 0) {
-      invalidHosts = [...new Set([...invalidHosts, ...priceCheckResults.failed])]
+      invalidHosts = [...new Set([...invalidHosts, ...priceCheckResults.failed.map((obj) => obj.host)])]
     }
   }
   if (validHosts.length < hostCount) {
     const error = {
       message: `Unable to find ${hostCount} hosts with provided max price. Found ${validHosts.length} matching host(s)`,
-      invalidHosts: invalidHosts.map((obj) => obj.host)
+      invalidHosts: invalidHosts
     }
     throw new Error(JSON.stringify(error))
   }
@@ -173,42 +99,25 @@ async function gatherMatchingValidHosts ({ duration, hostCount = 1 }, hostList, 
   return uploadHosts
 }
 
-async function checkPricesOnHosts (payAccept, hosts, duration, maxInterval, maxPrice, manifestJson) {
-  const fetchPromises = hosts.map((host) => fetchHostPrice(payAccept, host, duration, manifestJson))
-  const priceCheckResults = await checkHostsPrices(fetchPromises, maxPrice, maxInterval)
+async function checkPricesOnHosts (hosts, paidRequest) {
+  const fetchPromises = hosts.map((host) => fetchHostPrice(host, paidRequest))
+  const priceCheckResults = await checkHostsPrices(fetchPromises, paidRequest)
   if (priceCheckResults.failed.length !== 0) {
     throw new Error(JSON.stringify(priceCheckResults.failed, null, 2))
   }
-  return priceCheckResults.success
+  return hosts
 }
 
-async function getValidHosts (pull, options, hostOpts) {
+async function getValidHosts (options, hostOpts) {
   let uploadHosts = []
-  let payAccept
-  if (pull) {
-    payAccept = 'interledger-pull'
-  } else {
-    payAccept = 'interledger-stream'
-  }
-  const maxInterval = moment.duration(options.maxInterval)
   if (options.host || (hostOpts.codiusHostsExists && !options.hostCount)) {
-    uploadHosts = await checkPricesOnHosts(payAccept, hostOpts.hostList, options.duration, maxInterval, hostOpts.maxPrice, hostOpts.manifestJson)
+    await checkPricesOnHosts(hostOpts.hostList, hostOpts.paidRequest)
+    uploadHosts = hostOpts.hostList
   } else {
-    uploadHosts = await gatherMatchingValidHosts(payAccept, options, hostOpts.hostList, hostOpts.maxPrice, hostOpts.manifestJson)
+    uploadHosts = await gatherMatchingValidHosts(options, hostOpts.hostList, hostOpts.paidRequest)
   }
-  const hosts = uploadHosts.map((item) => item.host)
-  if (!pull) {
-    return { validHosts: hosts }
-  } else {
-    const pullDetails = uploadHosts.reduce((obj, item) => {
-      obj[item.host] = {
-        price: item.hostPrice,
-        interval: item.headers.get('interledger-pull-interval')
-      }
-      return obj
-    }, {})
-    return { validHostList: hosts, pullDetails: pullDetails }
-  }
+
+  return uploadHosts
 }
 
 function getHostsStatus (codiusStateJson) {
@@ -249,10 +158,33 @@ function getHostList ({ host, manifestHash }) {
   return cleanHostListUrls(hostsArr)
 }
 
+// TODO: Use pull details from hosts?
+function createPullPointer (host, paidRequest) {
+  const fetchFunction = paidRequest.createPullPointer()
+  return fetchPromise(fetchFunction, host)
+}
+
+async function createPullPointers (hosts, paidRequest) {
+  const createPromises = hosts.map((host) => {
+    return createPullPointer(host, paidRequest)
+  })
+  const responses = await Promise.all(createPromises)
+  return responses.reduce((acc, curr) => {
+    const res = curr.response || curr
+    if (checkStatus(curr)) {
+      acc[curr.host] = res.pointer
+    } else {
+      throw new Error(curr.message)
+    }
+    return acc
+  }, {})
+}
+
 module.exports = {
   cleanHostListUrls,
   getValidHosts,
   checkPricesOnHosts,
+  createPullPointers,
   getHostsStatus,
   getHostList
 }

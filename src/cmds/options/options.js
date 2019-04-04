@@ -4,14 +4,12 @@
  * @author Travis Crist
  */
 
-const config = require('../../config.js')
-
 const duration = {
   duration: {
     alias: 'd',
     type: 'number',
-    default: config.duration,
-    description: 'Duration (in seconds) the pod will be run on all Codius hosts, defaults to 10 mins.'
+    description: 'Duration (in seconds) the pod will be run on all Codius hosts, defaults to 10 mins. Conflicts with --forever.'
+    // NOTE: The default is not set using yargs since it conflcts with --forever.
   }
 }
 
@@ -28,7 +26,7 @@ const maxMonthlyRate = {
   'max-monthly-rate': {
     alias: 'm',
     type: 'number',
-    description: 'Max rate per month the uploader is willing to pay a Codius host to run the pod, requires --units flag to be set. Defaults to 10. It conflicts with --max-price.'
+    description: 'Max rate per month the uploader is willing to pay a Codius host to run the pod, requires --units flag to be set. Defaults to 10.'
     // NOTE: The default is not set using yargs so that when this param is set yargs requires the units param.
   }
 }
@@ -67,24 +65,22 @@ const tail = {
   }
 }
 
+const forever = {
+  'forever': {
+    type: 'boolean',
+    description: 'Upload the pod to run indefinitely. Requires --pull-server-url, --pull-server-secret and --max-interval. Conflicts with --duration.'
+  }
+}
+
 const maxInterval = {
   'max-interval': {
     type: 'string',
-    default: config.interval,
-    description: 'ISO 8601 duration indicating the maximum period of time the uploader is willing to prepay in case of pull payment. Requires --max-price flag to be set. Default is 1 month (P0Y1M).'
+    description: 'ISO 8601 duration indicating the maximum period of time the uploader is willing to prepay in case of recurring pull payment. Default is 1 month (P0Y1M). Requires --forever.'
+    // NOTE: The default is not set using yargs so that when this param is set yargs requires the forever param.
   }
 }
 
-const maxPrice = {
-  'max-price': {
-    type: 'number',
-    default: config.price.amount,
-    description: 'Max price the uploader is willing to pay a Codius host to run the pod for `max-interval` (pull), requires --units flag and --max-interval flag to be set. Default is 10. It conflicts with --max-monthly-rate.'
-    // NOTE: The default is not set using yargs so that when this param is set yargs requires the units param.
-  }
-}
-
-const pullServerURL = {
+const pullServerUrl = {
   'pull-server-url': {
     type: 'string',
     description: 'Public URL of pull payment SPSP server, e.g. \'https://mypullserver.example.com\'.'
@@ -176,7 +172,9 @@ const extendOptions = {
   ...maxMonthlyRate,
   ...units,
   ...codiusStateFileExtend,
-  ...assumeYes
+  ...assumeYes,
+  ...pullServerUrl,
+  ...pullServerSecret
 }
 
 const bufferSec = {
@@ -245,9 +243,9 @@ const uploadOptions = {
   ...assumeYes,
   ...debug,
   ...tail,
+  ...forever,
   ...maxInterval,
-  ...maxPrice,
-  ...pullServerURL,
+  ...pullServerUrl,
   ...pullServerSecret
 }
 
@@ -256,7 +254,9 @@ const extendManifestOptions = {
   ...extendDuration,
   ...maxMonthlyRate,
   ...units,
-  ...assumeYes
+  ...assumeYes,
+  ...pullServerUrl,
+  ...pullServerSecret
 }
 
 const tailOptions = {

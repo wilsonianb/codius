@@ -6,9 +6,10 @@
 
 const { hashManifest } = require('codius-manifest')
 const { getCurrencyDetails, unitsPerHost } = require('../common/price.js')
-const { getValidHosts, cleanHostListUrls } = require('../common/host-utils.js')
+const { createPullPointers, getValidHosts, cleanHostListUrls } = require('../common/host-utils.js')
+const { StreamRequest, PullRequest, OneTimePullRequest, RecurringPullRequest } = require('../common/paid-request.js')
 const { discoverHosts } = require('../common/discovery.js')
-const { uploadManifestToHosts } = require('../common/manifest-upload.js')
+const { getUploadRequest, uploadManifestToHosts } = require('../common/manifest-upload.js')
 const { attachToLogs } = require('../common/pod-control.js')
 const ora = require('ora')
 const { generateManifest } = require('codius-manifest')
@@ -44,10 +45,17 @@ async function addHostsToManifest (status, { addHostEnv }, manifestJson, hosts) 
   }
 }
 
-function getUploadOptions ({ maxMonthlyRate = config.price.amount, duration, units = config.price.units }) {
+function getUploadOptions ({
+  forever,
+  maxInterval = config.interval,
+  maxMonthlyRate = config.price.amount,
+  duration = config.duration,
+  units = config.price.units
+}) {
   return {
+    maxInterval: forever ? maxInterval : undefined,
     maxMonthlyRate: maxMonthlyRate,
-    duration: duration,
+    duration: forever ? 'forever' : duration,
     units: units
   }
 }
@@ -60,7 +68,7 @@ async function upload (options) {
     statusIndicator.start('Generating Codius Manifest')
     const generatedManifestObj = await generateManifest(options.codiusVarsFile, options.codiusFile)
     checkDebugFlag(generatedManifestObj.manifest)
-
+    const uploadOptions = getUploadOptions(options)
     if (options.debug) {
       generatedManifestObj.manifest.debug = true
     }
@@ -83,24 +91,42 @@ async function upload (options) {
     }
     const cleanHostList = cleanHostListUrls(hostList)
     statusIndicator.start('Calculating Max Price')
-    const maxPrice = await unitsPerHost(options)
-    const currencyDetails = await getCurrencyDetails()
+    const maxPrice = unitsPerHost(uploadOptions)
+    const pull = options.pullServerUrl && options.pullServerSecret
+    const recurring = pull && options.forever
+    const sourceMaxPrice = pull
+      ? await PullRequest.convertToSourceAsset(options.pullServerUrl, {
+        amount: maxPrice,
+        assetCode: uploadOptions.units
+      })
+      : await StreamRequest.convertToSourceAsset({
+        amount: maxPrice,
+        assetCode: uploadOptions.units
+      })
+    statusIndicator.succeed()
+    const currencyDetails = getCurrencyDetails(sourceMaxPrice)
+    statusIndicator.start(`Checking Host(s) Price vs Max Price ${sourceMaxPrice.amount} ${currencyDetails}`)
+    const request = getUploadRequest(generatedManifestObj) // can't add manifest to body yet since we may add hosts list :/
 
-    let pull = false
-    if (options.pullServerURL && options.pullServerSecret) {
-      pull = true
-    }
-
-    statusIndicator.start(`Checking Host(s) Price vs Max Price ${maxPrice.toString()} ${currencyDetails}`)
     const validHostOptions = {
-      maxPrice,
       hostList: cleanHostList,
-      manifestJson: generatedManifestObj,
       codiusHostsExists
     }
-    const { validHostList, pullDetails } = await getValidHosts(pull, options, validHostOptions)
+
+    if (pull) {
+      if (recurring) {
+        validHostOptions['paidRequest'] = new RecurringPullRequest('/pods', request, sourceMaxPrice, options.maxInterval, options.pullServerUrl, options.pullServerSecret)
+      } else {
+        validHostOptions['paidRequest'] = new OneTimePullRequest(`/pods?duration=${uploadOptions.duration}`, request, sourceMaxPrice, options.pullServerUrl, options.pullServerSecret)
+      }
+    } else {
+      validHostOptions['paidRequest'] = new StreamRequest(`/pods?duration=${uploadOptions.duration}`, request, sourceMaxPrice)
+    }
+
+    const validHostList = await getValidHosts(options, validHostOptions)
     statusIndicator.succeed()
     addHostsToManifest(statusIndicator, options, generatedManifestObj, validHostList)
+    validHostOptions.paidRequest.request = getUploadRequest(generatedManifestObj)
     const manifestHash = hashManifest(generatedManifestObj.manifest)
 
     if (!options.assumeYes) {
@@ -112,7 +138,7 @@ async function upload (options) {
       console.info('will be uploaded to host(s):')
       jsome(validHostList)
       console.info('with options:')
-      jsome(getUploadOptions(options))
+      jsome(getUploadOptions(uploadOptions))
       statusIndicator.warn(`All information in the ${chalk.red('manifest')} property will be made ${chalk.red('public')}!`)
       if (options.debug) {
         statusIndicator.warn(`Debug logging for this pod will be enabled. Logs will be made ${chalk.red('public')}!`)
@@ -131,15 +157,16 @@ async function upload (options) {
       }
     }
 
+    let pullPointers = {}
     if (pull) {
       statusIndicator.start(`Creating pull payment pointers for ${validHostList.length} host(s)`)
-      const pullPointers = await requestPointers(options, pullDetails)
+      pullPointers = await createPullPointers(validHostList, validHostOptions.paidRequest)
     }
 
     statusIndicator.start(`Uploading to ${validHostList.length} host(s)`)
 
     const uploadHostsResponse = await uploadManifestToHosts(statusIndicator,
-      validHostList, options.duration, maxPrice, generatedManifestObj)
+      validHostList, validHostOptions.paidRequest, pullPointers, uploadOptions.duration)
 
     if (uploadHostsResponse.success.length > 0) {
       statusIndicator.start('Updating Codius State File')

@@ -36,7 +36,9 @@ async function fetchPromise (fetchFunction, host, timeout = null) {
         hostAssetCode: res.destination ? res.destination.assetCode : undefined,
         hostAssetScale: res.destination ? res.destination.assetScale : undefined,
         response: await res.json(),
-        price: res.price || undefined
+        price: res.price || undefined,
+        assetCode: res.source ? res.source.assetCode : undefined,
+        assetScale: res.source ? res.source.assetScale : undefined
       }
     } else {
       return {

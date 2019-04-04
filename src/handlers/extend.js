@@ -7,7 +7,8 @@
 const { hashManifest } = require('codius-manifest')
 const { getCurrencyDetails, unitsPerHost } = require('../common/price.js')
 const { checkPricesOnHosts, getHostsStatus } = require('../common/host-utils.js')
-const { uploadManifestToHosts } = require('../common/manifest-upload.js')
+const { StreamRequest, PullRequest, OneTimePullRequest } = require('../common/paid-request.js')
+const { getUploadRequest, uploadManifestToHosts } = require('../common/manifest-upload.js')
 const { getCodiusState } = require('../common/codius-state.js')
 const ora = require('ora')
 const statusIndicator = ora({ text: '', color: 'blue', spinner: 'point' })
@@ -63,14 +64,30 @@ async function extend (options) {
 
     statusIndicator.start('Calculating Max Price')
     const maxPrice = await unitsPerHost(stateOptions)
-    const currencyDetails = await getCurrencyDetails()
-    statusIndicator.start(`Checking Host(s) Price vs Max Price ${maxPrice.toString()} ${currencyDetails}`)
-    await checkPricesOnHosts(hostList, stateOptions.duration, maxPrice, manifestJson)
+    const pull = options.pullServerUrl && options.pullServerSecret
+    const sourceMaxPrice = pull
+      ? await PullRequest.convertToSourceAsset(options.pullServerUrl, {
+        amount: maxPrice,
+        assetCode: stateOptions.units
+      })
+      : await StreamRequest.convertToSourceAsset({
+        amount: maxPrice,
+        assetCode: stateOptions.units
+      })
+    const currencyDetails = getCurrencyDetails(sourceMaxPrice)
+    statusIndicator.start(`Checking Host(s) Price vs Max Price ${sourceMaxPrice.amount.toString()} ${currencyDetails}`)
+    const request = getUploadRequest(manifestJson)
+
+    const paidRequest = pull
+      ? new OneTimePullRequest(`/pods?duration=${options.duration}`, request, sourceMaxPrice, options.pullServerUrl, options.pullServerSecret)
+      : new StreamRequest(`/pods?duration=${options.duration}`, request, sourceMaxPrice)
+
+    await checkPricesOnHosts(hostList, paidRequest)
     statusIndicator.succeed()
 
     statusIndicator.start(`Uploading to ${hostList.length} host(s)`)
     const uploadHostsResponse = await uploadManifestToHosts(statusIndicator,
-      hostList, stateOptions.duration, maxPrice, manifestJson)
+      hostList, paidRequest, stateOptions.duration)
 
     statusIndicator.start('Updating Codius State File')
     const saveStateOptions = {
