@@ -4,6 +4,8 @@
  * @author Travis Crist
  */
 
+const config = require('../../config.js')
+
 const duration = {
   duration: {
     alias: 'd',
@@ -75,8 +77,8 @@ const forever = {
 const maxInterval = {
   'max-interval': {
     type: 'string',
+    default: config.interval,
     description: 'ISO 8601 duration indicating the maximum period of time the uploader is willing to prepay in case of recurring pull payment. Default is 1 month (P0Y1M). Requires --forever.'
-    // NOTE: The default is not set using yargs so that when this param is set yargs requires the forever param.
   }
 }
 

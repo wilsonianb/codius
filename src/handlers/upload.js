@@ -53,6 +53,7 @@ function getUploadOptions ({
   units = config.price.units
 }) {
   return {
+    forever: forever,
     maxInterval: forever ? maxInterval : undefined,
     maxMonthlyRate: maxMonthlyRate,
     duration: forever ? 'forever' : duration,
@@ -93,34 +94,46 @@ async function upload (options) {
     statusIndicator.start('Calculating Max Price')
     const maxPrice = unitsPerHost(uploadOptions)
     const pull = options.pullServerUrl && options.pullServerSecret
-    const recurring = pull && options.forever
     const sourceMaxPrice = pull
-      ? await PullRequest.convertToSourceAsset(options.pullServerUrl, {
+      ? (await PullRequest.convertToSourceAsset(options.pullServerUrl, {
         amount: maxPrice,
         assetCode: uploadOptions.units
-      })
-      : await StreamRequest.convertToSourceAsset({
+      })).amount
+      : (await StreamRequest.convertToSourceAsset({
         amount: maxPrice,
         assetCode: uploadOptions.units
-      })
+      })).amount
     statusIndicator.succeed()
     const currencyDetails = getCurrencyDetails(sourceMaxPrice)
     statusIndicator.start(`Checking Host(s) Price vs Max Price ${sourceMaxPrice.amount} ${currencyDetails}`)
-    const request = getUploadRequest(generatedManifestObj) // can't add manifest to body yet since we may add hosts list :/
 
     const validHostOptions = {
       hostList: cleanHostList,
       codiusHostsExists
     }
 
+    const requestOptions = {
+      ...options,
+      request: getUploadRequest(generatedManifestObj),
+      maxPrice: sourceMaxPrice
+    }
     if (pull) {
-      if (recurring) {
-        validHostOptions['paidRequest'] = new RecurringPullRequest('/pods', request, sourceMaxPrice, options.maxInterval, options.pullServerUrl, options.pullServerSecret)
+      if (options.forever) {
+        validHostOptions['paidRequest'] = new RecurringPullRequest({
+          ...requestOptions,
+          path: '/pods'
+        })
       } else {
-        validHostOptions['paidRequest'] = new OneTimePullRequest(`/pods?duration=${uploadOptions.duration}`, request, sourceMaxPrice, options.pullServerUrl, options.pullServerSecret)
+        validHostOptions['paidRequest'] = new OneTimePullRequest({
+          ...requestOptions,
+          path: `/pods?duration=${uploadOptions.duration}`
+        })
       }
     } else {
-      validHostOptions['paidRequest'] = new StreamRequest(`/pods?duration=${uploadOptions.duration}`, request, sourceMaxPrice)
+      validHostOptions['paidRequest'] = new StreamRequest({
+        ...requestOptions,
+        path: `/pods?duration=${uploadOptions.duration}`
+      })
     }
 
     const validHostList = await getValidHosts(options, validHostOptions)

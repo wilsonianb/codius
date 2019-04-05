@@ -7,7 +7,7 @@ const config = require('../config.js')
 const logger = require('riverpig')('codius-cli:price')
 const BigNumber = require('bignumber.js')
 const moment = require('moment')
-const monthsPerSecond = 0.0000003802571
+const monthsPerSecond = 0.000000380517504
 const roundUpPriceConstant = 0.0008
 
 function getCurrencyDetails ({ assetCode, assetScale = 0 }) {
@@ -34,7 +34,7 @@ function unitsPerHost ({
   const totalFee = new BigNumber(seconds).times(monthsPerSecond).times(maxMonthlyRate)
   logger.debug(`Total fee in ${units}: ${totalFee}`)
   // Increase the price by 8/100ths of a percent since the server rounds up so we are not off by a few drops
-  const roundUpUnits = totalFee.multipliedBy(roundUpPriceConstant)//.integerValue(BigNumber.ROUND_CEIL)
+  const roundUpUnits = totalFee.multipliedBy(roundUpPriceConstant) // .integerValue(BigNumber.ROUND_CEIL)
   const amountOfUnits = totalFee.plus(roundUpUnits)
   logger.debug(`Total amount in ${units}: ${amountOfUnits}`)
   return amountOfUnits

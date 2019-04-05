@@ -142,7 +142,7 @@ async function saveCodiusState (
     if (hostDetailsObj && hostDetailsObj[obj.host]) {
       existingTotal = new BigNumber(hostDetailsObj[obj.host] ? hostDetailsObj[obj.host].price.totalPaid : 0)
     }
-    const updatedTotalPaid = existingTotal.plus(obj.pricePaid)
+    const updatedTotalPaid = obj.pricePaid ? existingTotal.plus(obj.pricePaid) : existingTotal
     hostDetailsObj[obj.host] = {
       url: obj.url,
       expirationDate: obj.expirationDate,

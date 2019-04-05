@@ -15,13 +15,11 @@ const os = require('os')
 const { getCurrencyDetails } = require('./price.js')
 
 class PaidRequest {
-  constructor (path, request, method, { amount, assetCode, assetScale }) {
+  constructor ({path, request, method, maxPrice}) {
     this.path = path
     this._request = request
     this.method = method
-    this.maxPrice = amount
-    this.assetCode = assetCode
-    this.assetScale = assetScale
+    this.maxPrice = maxPrice
   }
 
   set request (request) {
@@ -63,8 +61,13 @@ class PaidRequest {
 }
 
 class StreamRequest extends PaidRequest {
-  constructor (path, request, maxPrice) {
-    super(path, request, 'interledger-stream', maxPrice)
+  constructor ({path, request, maxPrice}) {
+    super({
+      path,
+      request,
+      method: 'interledger-stream',
+      maxPrice
+    })
   }
 
   static async convertToSourceAsset ({ amount, assetCode, assetScale = 0 }) {
@@ -104,11 +107,11 @@ class StreamRequest extends PaidRequest {
   }
 
   async checkHostPrice (resp) {
-    const hostPrice = (await this.getHostPrice(resp)).amount // Could we use asset details here instead of including them in constructor?
+    const {amount: hostPrice, assetCode, assetScale} = await this.getHostPrice(resp)
     if (this.maxPrice < hostPrice) {
       const currency = getCurrencyDetails({
-        assetCode: this.assetCode,
-        assetScale: this.assetScale
+        assetCode: assetCode,
+        assetScale: assetScale
       })
       throw new Error({
         message: 'Quoted price exceeded specified max price, please increase your max price.',
@@ -137,8 +140,13 @@ class StreamRequest extends PaidRequest {
 }
 
 class PullRequest extends PaidRequest {
-  constructor (path, request, maxPrice, pullServerUrl, pullServerSecret) {
-    super(path, request, 'interledger-pull', maxPrice)
+  constructor ({path, request, maxPrice, pullServerUrl, pullServerSecret}) {
+    super({
+      path,
+      request,
+      method: 'interledger-pull',
+      maxPrice
+    })
     this.pullServerUrl = pullServerUrl
     this.pullServerSecret = pullServerSecret
   }
@@ -202,11 +210,11 @@ class PullRequest extends PaidRequest {
 // Can this just be in PullRequest?
 class OneTimePullRequest extends PullRequest {
   async checkHostPrice (resp) {
-    const hostPrice = (await super.getHostPrice(resp)).amount
+    const {amount: hostPrice, assetCode, assetScale} = await super.getHostPrice(resp)
     if (this.maxPrice < hostPrice) {
       const currency = getCurrencyDetails({
-        assetCode: this.assetCode,
-        assetScale: this.assetScale
+        assetCode: assetCode,
+        assetScale: assetScale
       })
       throw new Error({
         message: 'Quoted price exceeded specified max price, please increase your max price.',
@@ -233,8 +241,8 @@ class OneTimePullRequest extends PullRequest {
 }
 
 class RecurringPullRequest extends PullRequest {
-  constructor (path, request, maxPrice, maxInterval, pullServerUrl, pullServerSecret) {
-    super(path, request, maxPrice, pullServerUrl, pullServerSecret)
+  constructor ({path, request, maxPrice, maxInterval, pullServerUrl, pullServerSecret}) {
+    super({path, request, maxPrice, pullServerUrl, pullServerSecret})
     this.maxInterval = moment.duration(maxInterval)
   }
 
@@ -247,7 +255,7 @@ class RecurringPullRequest extends PullRequest {
   }
 
   async checkHostPrice (resp) {
-    const hostPrice = (await super.getHostPrice(resp)).amount
+    const {amount: hostPrice, assetCode, assetScale} = await super.getHostPrice(resp)
     if (!resp.headers.get('interledger-pull-interval')) {
       throw new Error('Quote is missing pull interval.')
     }
@@ -268,8 +276,8 @@ class RecurringPullRequest extends PullRequest {
         return true
       } else {
         const currency = getCurrencyDetails({
-          assetCode: this.assetCode,
-          assetScale: this.assetScale
+          assetCode: assetCode,
+          assetScale: assetScale
         })
         throw new Error({
           message: "Host's minimum price exceeds your maximum price. Please increase your max price.",
@@ -282,8 +290,7 @@ class RecurringPullRequest extends PullRequest {
 
   async createPullPointer () {
     return super.createPullPointer({
-      cycles: Infinity,
-      interval: this.maxInterval
+      interval: this.maxInterval.toISOString()
     })
   }
 
