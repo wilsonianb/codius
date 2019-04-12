@@ -159,23 +159,9 @@ function getHostList ({ host, manifestHash }) {
 }
 
 // TODO: Use pull details from hosts?
-function createPullPointer (host, paidRequest) {
-  const fetchFunction = paidRequest.createPullPointer()
-  return fetchPromise(fetchFunction, host)
-}
-
-async function createPullPointers (hosts, paidRequest) {
-  const createPromises = hosts.map((host) => {
-    return createPullPointer(host, paidRequest)
-  })
-  const responses = await Promise.all(createPromises)
-  return responses.reduce((acc, curr) => {
-    const res = curr.response || curr
-    if (checkStatus(curr)) {
-      acc[curr.host] = res.pointer
-    } else {
-      throw new Error(curr.message)
-    }
+function createPullPointers (hosts, paidRequest) {
+  return hosts.reduce((acc, host) => {
+    acc[host] = paidRequest.createPullPointer(host)
     return acc
   }, {})
 }

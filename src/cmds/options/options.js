@@ -92,7 +92,7 @@ const pullServerUrl = {
 const pullServerSecret = {
   'pull-server-secret': {
     type: 'string',
-    description: 'Bearer token to communicate with the pull payment SPSP server.'
+    description: 'Secret used to sign pull payment pointer token.'
   }
 }
 

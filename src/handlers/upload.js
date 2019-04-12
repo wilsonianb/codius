@@ -173,7 +173,7 @@ async function upload (options) {
     let pullPointers = {}
     if (pull) {
       statusIndicator.start(`Creating pull payment pointers for ${validHostList.length} host(s)`)
-      pullPointers = await createPullPointers(validHostList, validHostOptions.paidRequest)
+      pullPointers = createPullPointers(validHostList, validHostOptions.paidRequest)
     }
 
     statusIndicator.start(`Uploading to ${validHostList.length} host(s)`)

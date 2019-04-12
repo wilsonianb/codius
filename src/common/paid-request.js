@@ -9,6 +9,7 @@ const ilpFetch = require('ilp-fetch')
 const plugin = require('ilp-plugin')()
 const IlpPrice = require('ilp-price')
 const ildcp = require('ilp-protocol-ildcp')
+const jwt = require('jsonwebtoken')
 const moment = require('moment')
 const nodeFetch = require('node-fetch')
 const os = require('os')
@@ -169,20 +170,17 @@ class PullRequest extends PaidRequest {
     return PullRequest.convertToSourceAsset(this.pullServerUrl, {amount, assetCode, assetScale})
   }
 
-  async createPullPointer (pullDetails) {
-    return nodeFetch(this.pullServerUrl, {
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.pullServerSecret}`
-      },
-      method: 'POST',
-      body: JSON.stringify({
-        ...pullDetails,
-        amount: this.maxPrice.toString(),
-        assetCode: this.assetCode,
-        assetScale: this.assetScale
-      })
+  createPullPointer (id, pullDetails) {
+    const token = jwt.sign({
+      ...pullDetails,
+      amount: this.maxPrice.toString(),
+      assetCode: this.assetCode,
+      assetScale: this.assetScale
+    }, this.pullServerSecret, {
+      algorithm: 'HS256',
+      jwtId: id
     })
+    return `${this.pullServerUrl}/${token}`
   }
 
   async getHostPrice (resp) {
@@ -225,8 +223,8 @@ class OneTimePullRequest extends PullRequest {
     return true
   }
 
-  async createPullPointer () {
-    return super.createPullPointer({
+  createPullPointer (id) {
+    return super.createPullPointer(id, {
       cycles: 1
     })
   }
@@ -288,8 +286,8 @@ class RecurringPullRequest extends PullRequest {
     }
   }
 
-  async createPullPointer () {
-    return super.createPullPointer({
+  createPullPointer (id) {
+    return super.createPullPointer(id, {
       interval: this.maxInterval.toISOString()
     })
   }

@@ -49,6 +49,7 @@
     "ilp-price": "^1.0.1",
     "inquirer": "^6.0.0",
     "jsome": "^2.5.0",
+    "jsonwebtoken": "^8.5.1",
     "lodash.samplesize": "^4.2.0",
     "moment": "^2.22.2",
     "multi-read-stream": "^2.0.0",
