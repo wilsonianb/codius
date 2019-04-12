@@ -4,8 +4,6 @@
  * @author Travis Crist
  */
 
-const config = require('../../config.js')
-
 const duration = {
   duration: {
     alias: 'd',
@@ -70,15 +68,15 @@ const tail = {
 const forever = {
   'forever': {
     type: 'boolean',
-    description: 'Upload the pod to run indefinitely. Requires --pull-server-url, --pull-server-secret and --max-interval. Conflicts with --duration.'
+    description: 'Upload the pod to run indefinitely. Requires --pull-server-url and --pull-server-secret. Conflicts with --duration.'
   }
 }
 
 const maxInterval = {
   'max-interval': {
     type: 'string',
-    default: config.interval,
     description: 'ISO 8601 duration indicating the maximum period of time the uploader is willing to prepay in case of recurring pull payment. Default is 1 month (P0Y1M). Requires --forever.'
+    // NOTE: The default is not set using yargs so that when this param is set yargs requires the forever param.
   }
 }
 
