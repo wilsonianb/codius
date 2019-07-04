@@ -46,7 +46,8 @@ async function fetchHostPrice (host, duration, manifestJson) {
     maxPrice: '0',
     method: 'OPTIONS',
     body: JSON.stringify(manifestJson),
-    timeout: 10000 // 10s
+    timeout: 10000, // 10s
+    plugin: require('ilp-plugin')()
   })
   return fetchPromise(fetchFunction, host)
 }
